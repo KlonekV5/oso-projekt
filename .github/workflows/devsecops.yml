@@ -1,0 +1,69 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  devsecops-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Krok 1: SCA (Software Composition Analysis)
+      - name: Run SCA scan (npm audit)
+        run: |
+          npm install
+          npm audit --audit-level=high || true
+        # Używamy "|| true", żeby pipeline szedł dalej nawet przy znalezieniu podatności
+
+      # Krok 2: SAST (Static Application Security Testing)
+      - name: Run SAST scan (Semgrep)
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: "p/default"
+        continue-on-error: true # Kontynuuj nawet przy znalezieniu podatności
+
+      # Krok 3: Secrets Scan
+      - name: Run Secrets scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true # Kontynuuj nawet przy znalezieniu podatności
+
+      # Krok 4: Build Docker Image
+      - name: Build Docker image
+        run: docker build -t klonekv5/oso-projekt:latest .
+        # Używamy Twojego loginu i nazwy repo jako nazwy obrazu
+
+      # Krok 5: Trivy (Container Image Scan)
+      - name: Run Container scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'klonekv5/oso-projekt:latest'
+          format: 'table'
+          severity: 'HIGH,CRITICAL'
+        continue-on-error: true # Kontynuuj nawet przy znalezieniu podatności
+
+      # Krok 6: DAST (Dynamic Application Security Testing)
+      - name: Run DAST scan (OWASP ZAP)
+        run: |
+          mkdir -p zap-report
+          docker run --rm --name juice-shop-dast -d -p 3000:3000 klonekv5/oso-projekt:latest
+          sleep 20
+          # Używamy IP kontenera, żeby ZAP mógł go znaleźć
+          IP_ADDRESS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' juice-shop-dast)
+          echo "Juice Shop running at IP: $IP_ADDRESS"
+          docker run --rm -v $(pwd)/zap-report:/zap/wrk/:rw owasp/zap2docker-stable zap-baseline.py -t http://$IP_ADDRESS:3000 -g gen.conf -J zap-report.json
+        continue-on-error: true # Kontynuuj nawet przy znalezieniu podatności
+
+      # Krok 7: Login to Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Krok 8: Push Image to Docker Hub
+      - name: Push image to Docker Hub
+        run: docker push klonekv5/oso-projekt:latest
