@@ -52,7 +52,8 @@ jobs:
           sleep 20
           IP_ADDRESS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' juice-shop-dast)
           echo "Juice Shop running at IP: $IP_ADDRESS"
-          docker run --rm -v $(pwd)/zap-report:/zap/wrk/:rw owasp/zap2docker-stable zap-baseline.py -t http://$IP_ADDRESS:3000 -g gen.conf -J zap-report.json
+          # Poniżej jedyna zmiana - używamy nowego, oficjalnego obrazu ZAP
+          docker run --rm -v $(pwd)/zap-report:/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py -t http://$IP_ADDRESS:3000 -g gen.conf -J zap-report.json
         continue-on-error: true
 
       - name: Push image to Docker Hub
